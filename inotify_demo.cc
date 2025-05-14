@@ -26,7 +26,6 @@ static void handle_events(int fd, int *wd, int argc, char *argv[]) {
   /* Loop while events can be read from inotify file descriptor. */
 
   for (;;) {
-
     /* Read some events. */
 
     size = read(fd, buf, sizeof(buf));
@@ -39,24 +38,19 @@ static void handle_events(int fd, int *wd, int argc, char *argv[]) {
        it returns -1 with errno set to EAGAIN. In that case,
        we exit the loop. */
 
-    if (size <= 0)
-      break;
+    if (size <= 0) break;
 
     /* Loop over all events in the buffer. */
 
     for (char *ptr = buf; ptr < buf + size;
          ptr += sizeof(struct inotify_event) + event->len) {
-
       event = (const struct inotify_event *)ptr;
 
       /* Print event type. */
 
-      if (event->mask & IN_OPEN)
-        printf("IN_OPEN: ");
-      if (event->mask & IN_CLOSE_NOWRITE)
-        printf("IN_CLOSE_NOWRITE: ");
-      if (event->mask & IN_CLOSE_WRITE)
-        printf("IN_CLOSE_WRITE: ");
+      if (event->mask & IN_OPEN) printf("IN_OPEN: ");
+      if (event->mask & IN_CLOSE_NOWRITE) printf("IN_CLOSE_NOWRITE: ");
+      if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
 
       /* Print the name of the watched directory. */
 
@@ -69,8 +63,7 @@ static void handle_events(int fd, int *wd, int argc, char *argv[]) {
 
       /* Print the name of the file. */
 
-      if (event->len)
-        printf("%s", event->name);
+      if (event->len) printf("%s", event->name);
 
       /* Print type of filesystem object. */
 
@@ -140,25 +133,20 @@ int main(int argc, char *argv[]) {
   while (1) {
     poll_num = poll(fds, nfds, -1);
     if (poll_num == -1) {
-      if (errno == EINTR)
-        continue;
+      if (errno == EINTR) continue;
       perror("poll");
       exit(EXIT_FAILURE);
     }
 
     if (poll_num > 0) {
-
       if (fds[0].revents & POLLIN) {
-
         /* Console input is available. Empty stdin and quit. */
 
-        while (read(STDIN_FILENO, &buf, 1) > 0 && buf != '\n')
-          continue;
+        while (read(STDIN_FILENO, &buf, 1) > 0 && buf != '\n') continue;
         break;
       }
 
       if (fds[1].revents & POLLIN) {
-
         /* Inotify events are available. */
 
         handle_events(fd, wd, argc, argv);
