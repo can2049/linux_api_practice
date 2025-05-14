@@ -22,13 +22,14 @@ int main(void) {
   retval = select(1, &rfds, NULL, NULL, &tv);
   /* Don't rely on the value of tv now! */
 
-  if (retval == -1)
+  if (retval == -1) {
     perror("select()");
-  else if (retval)
+  } else if (retval) {
     printf("Data is available now.\n");
-  /* FD_ISSET(0, &rfds) will be true. */
-  else
+  } else {
+    /* FD_ISSET(0, &rfds) will be true. */
     printf("No data within five seconds.\n");
+  }
 
   exit(EXIT_SUCCESS);
 }
