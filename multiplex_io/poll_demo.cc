@@ -35,6 +35,11 @@ int main(int argc, char *argv[]) {
   // Wait for events
   ret = poll(fds, MAX_FDS, TIMEOUT_MS);
   if (ret == -1) {
+    // print error message and exit
+    fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+    for (i = 0; i < MAX_FDS; i++) {
+      close(fds[i].fd);
+    }
     perror("poll");
     exit(EXIT_FAILURE);
   }
@@ -43,6 +48,8 @@ int main(int argc, char *argv[]) {
     printf("Timeout occurred! No data after %d ms.\n", TIMEOUT_MS);
     exit(EXIT_SUCCESS);
   }
+
+  printf("%d file descriptors ready for reading\n", ret);
 
   // Check which file descriptors have events
   for (i = 0; i < MAX_FDS; i++) {
