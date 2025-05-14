@@ -1,188 +1,139 @@
 #include <arpa/inet.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-constexpr int MAX_EVENTS = 10;
-constexpr int BUFFER_SIZE = 1024;
-constexpr int PORT = 8080;
+#include <cstring>
+#include <iostream>
 
-// Function to set a socket to non-blocking mode
-static void set_nonblocking(int sockfd) {
-  int flags = fcntl(sockfd, F_GETFL, 0);
-  if (flags == -1) {
-    perror("fcntl F_GETFL");
-    exit(EXIT_FAILURE);
-  }
+#define PORT 8080
+#define MAX_EVENTS 10
+#define BUFFER_SIZE 1024
 
-  if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    perror("fcntl F_SETFL");
-    exit(EXIT_FAILURE);
-  }
+// Set socket to non-blocking
+int set_nonblocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) return -1;
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 int main() {
-  int server_fd, client_fd, epoll_fd;
-  struct sockaddr_in server_addr, client_addr;
-  socklen_t client_len = sizeof(client_addr);
-  struct epoll_event ev, events[MAX_EVENTS];
-  char buffer[BUFFER_SIZE];
-  int nfds, i, n;
+  int listen_sock, conn_sock, epoll_fd;
+  struct sockaddr_in serv_addr, cli_addr;
+  socklen_t cli_len = sizeof(cli_addr);
 
-  // Create TCP socket
-  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+  // Create listening socket
+  listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (listen_sock < 0) {
     perror("socket");
     exit(EXIT_FAILURE);
   }
 
-  // Set socket options - allow reuse of address/port
+  // Set reuse address
   int opt = 1;
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-    perror("setsockopt");
-    exit(EXIT_FAILURE);
-  }
+  setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-  // Bind socket to port
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(PORT);
+  // Bind to localhost:8080
+  memset(&serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);  // Listen on all interfaces
+  serv_addr.sin_port = htons(PORT);
 
-  if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ==
-      -1) {
+  if (bind(listen_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
     perror("bind");
+    close(listen_sock);
     exit(EXIT_FAILURE);
   }
 
-  // Start listening for connections
-  if (listen(server_fd, SOMAXCONN) == -1) {
+  if (listen(listen_sock, SOMAXCONN) < 0) {
     perror("listen");
+    close(listen_sock);
     exit(EXIT_FAILURE);
   }
 
-  printf("Server listening on port %d...\n", PORT);
+  std::cout << "Server is running on 127.0.0.1:8080..." << std::endl;
 
   // Create epoll instance
-  // The argument to epoll_create is a hint for the kernel about the number of
-  // file descriptors to monitor. It's ignored in modern kernels (since 2.6.8),
-  // but must be > 0.
-  if ((epoll_fd = epoll_create1(0)) == -1) {
+  epoll_fd = epoll_create1(0);
+  if (epoll_fd < 0) {
     perror("epoll_create1");
+    close(listen_sock);
     exit(EXIT_FAILURE);
   }
 
-  // Add the server socket to the epoll interest list
-  // We're interested in read events (EPOLLIN) on the server socket (new
-  // connections)
-  ev.events = EPOLLIN | EPOLLET;  // Edge-triggered mode
-  ev.data.fd = server_fd;
-  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
-    perror("epoll_ctl: server_fd");
+  struct epoll_event ev, events[MAX_EVENTS];
+  ev.events = EPOLLIN;
+  ev.data.fd = listen_sock;
+
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listen_sock, &ev) < 0) {
+    perror("epoll_ctl: listen_sock");
+    close(listen_sock);
+    close(epoll_fd);
     exit(EXIT_FAILURE);
   }
 
-  // Main event loop
-  while (1) {
-    // Wait for events (indefinitely, no timeout)
-    // Returns the number of file descriptors ready for I/O
-    nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-    if (nfds == -1) {
+  while (true) {
+    int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+    if (nfds < 0) {
       perror("epoll_wait");
-      exit(EXIT_FAILURE);
+      break;
     }
 
-    printf("epoll_wait returned %d events\n", nfds);
+    for (int n = 0; n < nfds; ++n) {
+      if (events[n].data.fd == listen_sock) {
+        // Accept new connection
+        conn_sock = accept(listen_sock, (struct sockaddr*)&cli_addr, &cli_len);
+        if (conn_sock < 0) {
+          perror("accept");
+          continue;
+        }
 
-    // Process all events
-    for (i = 0; i < nfds; i++) {
-      // Check for error conditions first
-      if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-        fprintf(stderr, "epoll error on fd %d\n", events[i].data.fd);
-        close(events[i].data.fd);
-        continue;
-      }
+        set_nonblocking(conn_sock);
+        ev.events = EPOLLIN | EPOLLET;
+        ev.data.fd = conn_sock;
 
-      // Handle new connection on server socket
-      if (events[i].data.fd == server_fd) {
-        // Accept all pending connections (important for edge-triggered mode)
-        while (1) {
-          client_fd =
-              accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
-          if (client_fd == -1) {
-            // No more connections to accept
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-              break;
-            } else {
-              perror("accept");
-              break;
-            }
-          }
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn_sock, &ev) < 0) {
+          perror("epoll_ctl: conn_sock");
+          close(conn_sock);
+        }
+      } else {
+        // Handle data from client
+        int client_fd = events[n].data.fd;
+        char buffer[BUFFER_SIZE];
+        ssize_t count = read(client_fd, buffer, sizeof(buffer) - 1);
 
-          // Print client info
+        if (count <= 0) {
+          // Client disconnected or error
+          if (count == 0)
+            std::cout << "Client disconnected." << std::endl;
+          else
+            perror("read");
+
+          epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
+          close(client_fd);
+        } else {
+          buffer[count] = '\0';  // Null-terminate
+
+          // Get client information
+          struct sockaddr_in client_addr;
+          socklen_t client_len = sizeof(client_addr);
+          getpeername(client_fd, (struct sockaddr*)&client_addr, &client_len);
           char client_ip[INET_ADDRSTRLEN];
           inet_ntop(AF_INET, &client_addr.sin_addr, client_ip,
                     sizeof(client_ip));
-          printf("New connection from %s:%d\n", client_ip,
-                 ntohs(client_addr.sin_port));
+          int client_port = ntohs(client_addr.sin_port);
 
-          // Set client socket to non-blocking
-          set_nonblocking(client_fd);
-
-          // Add client socket to epoll interest list
-          // We monitor for read events (EPOLLIN) and also hang-up events
-          // (EPOLLRDHUP)
-          ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
-          ev.data.fd = client_fd;
-          if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
-            perror("epoll_ctl: client_fd");
-            close(client_fd);
-          }
-        }
-      }
-      // Handle data from client
-      else {
-        // With edge-triggered mode, we must read all available data
-        int done = 0;
-        while (!done) {
-          ssize_t count = read(events[i].data.fd, buffer, BUFFER_SIZE);
-          if (count == -1) {
-            // No more data to read
-            if (errno != EAGAIN) {
-              perror("read");
-              done = 1;
-            }
-            break;
-          } else if (count == 0) {
-            // EOF - client disconnected
-            printf("Client disconnected (fd=%d)\n", events[i].data.fd);
-            close(events[i].data.fd);
-            done = 1;
-            break;
-          }
-
-          // Process the data we read
-          printf("Received %zd bytes from fd %d: %.*s\n", count,
-                 events[i].data.fd, (int)count, buffer);
-
-          // Echo back to client
-          if (write(events[i].data.fd, buffer, count) == -1) {
-            perror("write");
-            close(events[i].data.fd);
-            done = 1;
-          }
+          std::cout << "Received from client [" << client_ip << ":"
+                    << client_port << "]: " << buffer;
+          write(client_fd, buffer, count);  // Echo back
         }
       }
     }
   }
 
-  // Cleanup (though we never reach here in this simple example)
-  close(server_fd);
+  close(listen_sock);
   close(epoll_fd);
   return 0;
 }
