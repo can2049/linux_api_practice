@@ -3,6 +3,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
 add_subdirectory(multiplex_io)
+add_subdirectory(cpu)
 
 add_executable(watch_file_change watch_file_change.cc)
 add_executable(inotify_demo inotify_demo.cc)
