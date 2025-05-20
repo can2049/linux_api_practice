@@ -1,0 +1,4 @@
+add_executable(check_network_ok check_network_ok.cc)
+target_link_libraries(check_network_ok PRIVATE curl)
+
+add_executable(socket_network_check socket_network_check.cc)

@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include <iostream>
+
 /* include for getrusage */
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -42,5 +44,11 @@ void print_rusage() {
 
 int main(int argc, char *argv[]) {
   print_rusage();
+
+  std::cout << "===========================" << std::endl;
+  struct rusage usage;
+  getrusage(RUSAGE_SELF, &usage);
+  std::cout << "User CPU time: " << usage.ru_utime.tv_sec << "s "
+            << usage.ru_utime.tv_usec << "us" << std::endl;
   return 0;
 }
